@@ -93,12 +93,10 @@ def get_client():
 
 
 def get_real_messages(messages):
-    """Berichten zonder de starter-prompt."""
     return [m for m in messages if m["content"] != "Laten we beginnen."]
 
 
 def get_chunks(messages):
-    """Splits berichten in chunks van CHUNK_SIZE."""
     real = get_real_messages(messages)
     chunks = []
     for i in range(0, len(real), CHUNK_SIZE):
@@ -107,37 +105,75 @@ def get_chunks(messages):
 
 
 def chunk_is_complete(chunk_index, messages):
-    """Een chunk is compleet als er een volgende chunk is begonnen."""
     chunks = get_chunks(messages)
     return chunk_index < len(chunks) - 1
 
 
+def dropbox_upload(token, filename, content):
+    """Upload een bestand naar Dropbox. Geeft (True, pad) of (False, fout) terug."""
+    try:
+        import dropbox
+        from dropbox.exceptions import AuthError
+        from dropbox.files import WriteMode
+        dbx = dropbox.Dropbox(token)
+        dbx.users_get_current_account()
+        path = f"/Autobiografie/{filename}"
+        dbx.files_upload(
+            content.encode("utf-8"),
+            path,
+            mode=WriteMode.overwrite,
+        )
+        return True, path
+    except Exception as e:
+        return False, str(e)
+
+
+def cloud_save(filename, content):
+    """Sla op in Dropbox als token aanwezig is."""
+    token = st.session_state.get("dropbox_token", "")
+    if not token:
+        return
+    ok, result = dropbox_upload(token, filename, content)
+    if ok:
+        st.session_state["dropbox_last_save"] = f"✅ Opgeslagen in Dropbox: {result}"
+    else:
+        st.session_state["dropbox_last_save"] = f"⚠️ Dropbox fout: {result}"
+
+
 def autosave(messages, chapters):
-    """Sla automatisch op na elke beurt."""
-    OUTPUT_DIR.mkdir(exist_ok=True)
     base_name = st.session_state.get("base_name", datetime.now().strftime("%Y%m%d_%H%M%S"))
-    json_path = OUTPUT_DIR / f"data_{base_name}.json"
-    with open(json_path, "w", encoding="utf-8") as f:
-        json.dump({
-            "created_at": datetime.now().isoformat(),
-            "messages": messages,
-            "chapters": chapters,
-        }, f, ensure_ascii=False, indent=2)
+    data = json.dumps({
+        "created_at": datetime.now().isoformat(),
+        "messages": messages,
+        "chapters": chapters,
+    }, ensure_ascii=False, indent=2)
+
+    # Lokaal opslaan (werkt niet op Streamlit Cloud, maar geen fout)
+    try:
+        OUTPUT_DIR.mkdir(exist_ok=True)
+        (OUTPUT_DIR / f"data_{base_name}.json").write_text(data, encoding="utf-8")
+    except Exception:
+        pass
+
+    # Cloud opslaan
+    cloud_save(f"data_{base_name}.json", data)
 
 
 def save_autobiography(text, base_name):
-    OUTPUT_DIR.mkdir(exist_ok=True)
-    path = OUTPUT_DIR / f"autobiografie_{base_name}.txt"
-    with open(path, "w", encoding="utf-8") as f:
-        f.write("MIJN AUTOBIOGRAFIE\n")
-        f.write(f"Gegenereerd op: {datetime.now().strftime('%d %B %Y')}\n")
-        f.write("=" * 60 + "\n\n")
-        f.write(text)
+    content = f"MIJN AUTOBIOGRAFIE\nGegenereerd op: {datetime.now().strftime('%d %B %Y')}\n{'=' * 60}\n\n{text}"
+
+    try:
+        OUTPUT_DIR.mkdir(exist_ok=True)
+        path = OUTPUT_DIR / f"autobiografie_{base_name}.txt"
+        path.write_text(content, encoding="utf-8")
+    except Exception:
+        path = Path(f"autobiografie_{base_name}.txt")
+
+    cloud_save(f"autobiografie_{base_name}.txt", content)
     return path
 
 
 def generate_chapter(client, chunk_messages, chunk_index):
-    """Genereer een hoofdstuk voor een chunk."""
     fragment = ""
     for msg in chunk_messages:
         role = "Interviewer" if msg["role"] == "assistant" else "Persoon"
@@ -156,7 +192,6 @@ def generate_chapter(client, chunk_messages, chunk_index):
 
 
 def assemble_autobiography(client, chapters):
-    """Samengestelde autobiografie van alle hoofdstukken."""
     all_chapters = "\n\n---\n\n".join(
         f"Hoofdstuk {i+1}:\n{ch}" for i, ch in enumerate(chapters)
     )
@@ -186,13 +221,6 @@ st.markdown("""
 <style>
     .block-container { max-width: 1100px; }
     h1 { font-size: 1.8rem !important; }
-    .chapter-box {
-        background: #1e1e2e;
-        border-left: 3px solid #7c6af7;
-        padding: 1rem 1.2rem;
-        border-radius: 8px;
-        margin-bottom: 1rem;
-    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -202,11 +230,13 @@ st.markdown("""
 
 defaults = {
     "messages": [],
-    "chapters": {},        # {chunk_index: chapter_text}
+    "chapters": {},
     "autobiography": None,
     "base_name": datetime.now().strftime("%Y%m%d_%H%M%S"),
     "started": False,
     "api_key": os.environ.get("ANTHROPIC_API_KEY", ""),
+    "dropbox_token": "",
+    "dropbox_last_save": "",
 }
 for key, val in defaults.items():
     if key not in st.session_state:
@@ -223,6 +253,42 @@ if not st.session_state.api_key:
 client = get_client()
 
 # ---------------------------------------------------------------------------
+# Zijbalk
+# ---------------------------------------------------------------------------
+
+with st.sidebar:
+    st.header("☁️ Cloud opslag")
+
+    dropbox_input = st.text_input(
+        "Dropbox toegangstoken",
+        value=st.session_state.dropbox_token,
+        type="password",
+        placeholder="sl.xxxxxxxx...",
+        help="Maak een token aan op dropbox.com/developers → App Console → Generated access token",
+    )
+    if dropbox_input != st.session_state.dropbox_token:
+        st.session_state.dropbox_token = dropbox_input
+
+    if st.session_state.dropbox_token:
+        st.caption("✅ Dropbox actief — alles wordt automatisch opgeslagen in `/Autobiografie/`")
+        if st.session_state.dropbox_last_save:
+            st.caption(st.session_state.dropbox_last_save)
+    else:
+        st.caption("Geen token? Volg deze stappen:")
+        st.markdown("""
+1. Ga naar [dropbox.com/developers](https://www.dropbox.com/developers/apps)
+2. Klik **Create app**
+3. Kies **Scoped access** → **Full Dropbox**
+4. Geef de app een naam en klik **Create**
+5. Ga naar het tabblad **Settings** → scroll naar **Generated access token** → klik **Generate**
+6. Plak de token hierboven
+""")
+
+    st.divider()
+    st.caption(f"Sessie: {st.session_state.base_name}")
+    st.caption(f"Berichten: {max(0, len(st.session_state.messages) - 1)}")
+
+# ---------------------------------------------------------------------------
 # Layout: twee kolommen
 # ---------------------------------------------------------------------------
 
@@ -236,7 +302,6 @@ with col_chat:
     st.title("📖 Autobiografie Assistent")
     st.caption("Claude stelt je vragen om jouw levensverhaal te ontdekken.")
 
-    # Start het gesprek automatisch
     if not st.session_state.started:
         st.session_state.started = True
         with st.spinner("Claude bereidt zich voor..."):
@@ -254,7 +319,6 @@ with col_chat:
         st.session_state.messages.append({"role": "assistant", "content": opening})
         autosave(st.session_state.messages, st.session_state.chapters)
 
-    # Gespreksgeschiedenis
     for msg in st.session_state.messages:
         if msg["content"] == "Laten we beginnen.":
             continue
@@ -262,7 +326,6 @@ with col_chat:
         with st.chat_message(role, avatar="📖" if role == "assistant" else "👤"):
             st.markdown(msg["content"])
 
-    # Chat-invoer
     if prompt := st.chat_input("Jouw antwoord..."):
         st.session_state.messages.append({"role": "user", "content": prompt})
         with st.chat_message("user", avatar="👤"):
@@ -297,7 +360,6 @@ with col_book:
     st.subheader("📚 Jouw boek")
 
     chunks = get_chunks(st.session_state.messages)
-    has_chapters = bool(st.session_state.chapters)
 
     if not chunks:
         st.caption("Nog geen gesprek om om te zetten.")
@@ -330,7 +392,6 @@ with col_book:
 
     st.divider()
 
-    # Volledige autobiografie samenvoegen
     complete_chapters = [st.session_state.chapters[i] for i in sorted(st.session_state.chapters)]
     can_assemble = len(complete_chapters) >= 1
 
@@ -338,16 +399,15 @@ with col_book:
                  disabled=not can_assemble):
         with st.spinner("Autobiografie samenvoegen..."):
             st.session_state.autobiography = assemble_autobiography(client, complete_chapters)
-        path = save_autobiography(st.session_state.autobiography, st.session_state.base_name)
+        save_autobiography(st.session_state.autobiography, st.session_state.base_name)
         autosave(st.session_state.messages, st.session_state.chapters)
-        st.success(f"Opgeslagen als `{path.name}`")
         st.rerun()
 
     if st.session_state.autobiography:
         st.markdown("### 📜 Autobiografie")
         st.markdown(st.session_state.autobiography)
         st.download_button(
-            "⬇️ Download",
+            "⬇️ Download als tekstbestand",
             data=st.session_state.autobiography,
             file_name=f"autobiografie_{st.session_state.base_name}.txt",
             mime="text/plain",
