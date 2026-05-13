@@ -218,8 +218,8 @@ def chapter_to_docx_bytes(chapter_text, chapter_num):
     return buf.getvalue()
 
 
-def save_chapter_to_dropbox(chapter_text, chapter_num, base_name, version=1):
-    """Upload een hoofdstuk als Word-bestand naar Dropbox."""
+def save_chapter_to_dropbox(chapter_text, chapter_num, base_name):
+    """Upload een hoofdstuk als Word-bestand naar Dropbox met unieke timestamp."""
     token = st.session_state.get("dropbox_token", "")
     if not token or not st.session_state.get("dropbox_confirmed"):
         return
@@ -228,12 +228,11 @@ def save_chapter_to_dropbox(chapter_text, chapter_num, base_name, version=1):
         from dropbox.files import WriteMode
         dbx = dropbox.Dropbox(token)
         docx_bytes = chapter_to_docx_bytes(chapter_text, chapter_num)
-        versie = f"_v{version}" if version > 1 else ""
-        filename = f"hoofdstuk_{chapter_num:02d}{versie}_{base_name}.docx"
+        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = f"hoofdstuk_{chapter_num:02d}_{ts}.docx"
         path = f"/Autobiografie/{filename}"
-        dbx.files_upload(docx_bytes, path, mode=WriteMode.overwrite)
-        label = f"v{version} " if version > 1 else ""
-        st.toast(f"📄 Hoofdstuk {chapter_num} {label}opgeslagen als Word", icon="✅")
+        dbx.files_upload(docx_bytes, path, mode=WriteMode.add)
+        st.toast(f"📄 Hoofdstuk {chapter_num} opgeslagen als {filename}", icon="✅")
     except Exception as e:
         st.toast(f"Word-opslag mislukt: {e}", icon="⚠️")
 
@@ -557,7 +556,7 @@ with col_book:
                                 st.session_state.chapter_versions[i] = versie
                                 st.session_state.editing_chapter = None
                                 autosave(st.session_state.messages, st.session_state.chapters)
-                                save_chapter_to_dropbox(edited, i + 1, st.session_state.base_name, versie)
+                                save_chapter_to_dropbox(edited, i + 1, st.session_state.base_name)
                                 st.rerun()
                         with col2:
                             if st.button("✖ Annuleren", key=f"cancel_edit_{i}", use_container_width=True):
@@ -578,7 +577,7 @@ with col_book:
                                 versie = st.session_state.chapter_versions.get(i, 1) + 1
                                 st.session_state.chapter_versions[i] = versie
                                 autosave(st.session_state.messages, st.session_state.chapters)
-                                save_chapter_to_dropbox(st.session_state.chapters[i], i + 1, st.session_state.base_name, versie)
+                                save_chapter_to_dropbox(st.session_state.chapters[i], i + 1, st.session_state.base_name)
                                 st.rerun()
                 elif is_complete:
                     st.caption("Fragment afgerond — klaar om te schrijven.")
@@ -587,7 +586,7 @@ with col_book:
                             st.session_state.chapters[i] = generate_chapter(client, chunk, i)
                         st.session_state.chapter_versions[i] = 1
                         autosave(st.session_state.messages, st.session_state.chapters)
-                        save_chapter_to_dropbox(st.session_state.chapters[i], i + 1, st.session_state.base_name, 1)
+                        save_chapter_to_dropbox(st.session_state.chapters[i], i + 1, st.session_state.base_name)
                         st.rerun()
                 else:
                     st.caption(f"Gesprek loopt nog — komt beschikbaar na {CHUNK_SIZE - len(chunk)} berichten.")
