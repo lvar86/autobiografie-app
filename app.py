@@ -171,6 +171,67 @@ def cloud_save(filename, content):
         st.toast(f"Dropbox fout: {result}", icon="⚠️")
 
 
+def chapter_to_docx_bytes(chapter_text, chapter_num):
+    """Zet hoofdstuktekst om naar Word-bestand als bytes."""
+    from docx import Document
+    from docx.shared import Pt, RGBColor
+    from docx.enum.text import WD_ALIGN_PARAGRAPH
+    import io
+
+    doc = Document()
+
+    # Stijl instellen
+    style = doc.styles["Normal"]
+    style.font.name = "Georgia"
+    style.font.size = Pt(12)
+
+    lines = chapter_text.strip().split("\n")
+    title = f"Hoofdstuk {chapter_num}"
+    body_lines = []
+
+    for line in lines:
+        if line.startswith("## "):
+            title = line[3:].strip()
+        else:
+            body_lines.append(line)
+
+    # Titel
+    heading = doc.add_heading(title, level=1)
+    heading.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    for run in heading.runs:
+        run.font.color.rgb = RGBColor(0x1a, 0x1a, 0x2e)
+
+    doc.add_paragraph()
+
+    # Inhoud
+    for line in body_lines:
+        if line.strip():
+            p = doc.add_paragraph(line.strip())
+            p.paragraph_format.space_after = Pt(6)
+
+    buf = io.BytesIO()
+    doc.save(buf)
+    return buf.getvalue()
+
+
+def save_chapter_to_dropbox(chapter_text, chapter_num, base_name):
+    """Upload een hoofdstuk als Word-bestand naar Dropbox."""
+    token = st.session_state.get("dropbox_token", "")
+    if not token or not st.session_state.get("dropbox_confirmed"):
+        return
+    try:
+        import dropbox
+        from dropbox.files import WriteMode
+        dbx = dropbox.Dropbox(token)
+        docx_bytes = chapter_to_docx_bytes(chapter_text, chapter_num)
+        filename = f"hoofdstuk_{chapter_num:02d}_{base_name}.docx"
+        path = f"/Autobiografie/{filename}"
+        dbx.files_upload(docx_bytes, path, mode=WriteMode.overwrite)
+        st.toast(f"📄 Hoofdstuk {chapter_num} opgeslagen als Word", icon="✅")
+    except Exception as e:
+        st.toast(f"Word-opslag mislukt: {e}", icon="⚠️")
+
+
 def autosave(messages, chapters):
     base_name = st.session_state.get("base_name", datetime.now().strftime("%Y%m%d_%H%M%S"))
     data = json.dumps({
@@ -477,6 +538,7 @@ with col_book:
                         with st.spinner(f"Hoofdstuk {i + 1} herschrijven..."):
                             st.session_state.chapters[i] = generate_chapter(client, chunk, i)
                         autosave(st.session_state.messages, st.session_state.chapters)
+                        save_chapter_to_dropbox(st.session_state.chapters[i], i + 1, st.session_state.base_name)
                         st.rerun()
                 elif is_complete:
                     st.caption("Fragment afgerond — klaar om te schrijven.")
@@ -484,6 +546,7 @@ with col_book:
                         with st.spinner(f"Hoofdstuk {i + 1} schrijven..."):
                             st.session_state.chapters[i] = generate_chapter(client, chunk, i)
                         autosave(st.session_state.messages, st.session_state.chapters)
+                        save_chapter_to_dropbox(st.session_state.chapters[i], i + 1, st.session_state.base_name)
                         st.rerun()
                 else:
                     st.caption(f"Gesprek loopt nog — komt beschikbaar na {CHUNK_SIZE - len(chunk)} berichten.")
