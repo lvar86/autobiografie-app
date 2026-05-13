@@ -268,6 +268,19 @@ with st.sidebar:
     if st.session_state.dropbox_confirmed:
         st.success(f"✅ Verbonden als **{st.session_state.dropbox_account_name}**")
         st.caption("Alles wordt automatisch opgeslagen in `/Autobiografie/` in jouw Dropbox.")
+
+        if st.button("🧪 Test opslag", use_container_width=True):
+            with st.spinner("Testbestand uploaden..."):
+                ok, result = dropbox_upload(
+                    st.session_state.dropbox_token,
+                    "test.txt",
+                    f"Verbindingstest — {datetime.now().isoformat()}"
+                )
+            if ok:
+                st.success(f"✅ Gelukt! Bestand staat op {result}")
+            else:
+                st.error(f"❌ Mislukt: {result}")
+
         if st.button("🔌 Ontkoppelen", use_container_width=True):
             st.session_state.dropbox_token = ""
             st.session_state.dropbox_confirmed = False
