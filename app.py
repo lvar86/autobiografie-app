@@ -218,7 +218,7 @@ def chapter_to_docx_bytes(chapter_text, chapter_num):
     return buf.getvalue()
 
 
-def save_chapter_to_dropbox(chapter_text, chapter_num, base_name):
+def save_chapter_to_dropbox(chapter_text, chapter_num, base_name, version=1):
     """Upload een hoofdstuk als Word-bestand naar Dropbox."""
     token = st.session_state.get("dropbox_token", "")
     if not token or not st.session_state.get("dropbox_confirmed"):
@@ -228,10 +228,12 @@ def save_chapter_to_dropbox(chapter_text, chapter_num, base_name):
         from dropbox.files import WriteMode
         dbx = dropbox.Dropbox(token)
         docx_bytes = chapter_to_docx_bytes(chapter_text, chapter_num)
-        filename = f"hoofdstuk_{chapter_num:02d}_{base_name}.docx"
+        versie = f"_v{version}" if version > 1 else ""
+        filename = f"hoofdstuk_{chapter_num:02d}{versie}_{base_name}.docx"
         path = f"/Autobiografie/{filename}"
         dbx.files_upload(docx_bytes, path, mode=WriteMode.overwrite)
-        st.toast(f"📄 Hoofdstuk {chapter_num} opgeslagen als Word", icon="✅")
+        label = f"v{version} " if version > 1 else ""
+        st.toast(f"📄 Hoofdstuk {chapter_num} {label}opgeslagen als Word", icon="✅")
     except Exception as e:
         st.toast(f"Word-opslag mislukt: {e}", icon="⚠️")
 
@@ -334,6 +336,8 @@ defaults = {
     "dropbox_token": "",
     "dropbox_confirmed": False,
     "dropbox_account_name": "",
+    "chapter_versions": {},  # {chunk_index: versienummer}
+    "editing_chapter": None,  # chunk_index van hoofdstuk dat wordt bewerkt
 }
 for key, val in defaults.items():
     if key not in st.session_state:
@@ -537,20 +541,53 @@ with col_book:
 
             with st.expander(f"{status} {label}", expanded=chapter_exists):
                 if chapter_exists:
-                    st.markdown(st.session_state.chapters[i])
-                    if st.button("↩️ Opnieuw genereren", key=f"regen_{i}"):
-                        with st.spinner(f"Hoofdstuk {i + 1} herschrijven..."):
-                            st.session_state.chapters[i] = generate_chapter(client, chunk, i)
-                        autosave(st.session_state.messages, st.session_state.chapters)
-                        save_chapter_to_dropbox(st.session_state.chapters[i], i + 1, st.session_state.base_name)
-                        st.rerun()
+                    if st.session_state.editing_chapter == i:
+                        # Bewerkingsmodus
+                        edited = st.text_area(
+                            "Bewerk hoofdstuk",
+                            value=st.session_state.chapters[i],
+                            height=400,
+                            key=f"edit_area_{i}",
+                        )
+                        col1, col2 = st.columns(2)
+                        with col1:
+                            if st.button("💾 Opslaan", key=f"save_edit_{i}", use_container_width=True, type="primary"):
+                                st.session_state.chapters[i] = edited
+                                versie = st.session_state.chapter_versions.get(i, 1) + 1
+                                st.session_state.chapter_versions[i] = versie
+                                st.session_state.editing_chapter = None
+                                autosave(st.session_state.messages, st.session_state.chapters)
+                                save_chapter_to_dropbox(edited, i + 1, st.session_state.base_name, versie)
+                                st.rerun()
+                        with col2:
+                            if st.button("✖ Annuleren", key=f"cancel_edit_{i}", use_container_width=True):
+                                st.session_state.editing_chapter = None
+                                st.rerun()
+                    else:
+                        # Leesmodus
+                        st.markdown(st.session_state.chapters[i])
+                        col1, col2 = st.columns(2)
+                        with col1:
+                            if st.button("✏️ Bewerken", key=f"edit_{i}", use_container_width=True):
+                                st.session_state.editing_chapter = i
+                                st.rerun()
+                        with col2:
+                            if st.button("↩️ Opnieuw genereren", key=f"regen_{i}", use_container_width=True):
+                                with st.spinner(f"Hoofdstuk {i + 1} herschrijven..."):
+                                    st.session_state.chapters[i] = generate_chapter(client, chunk, i)
+                                versie = st.session_state.chapter_versions.get(i, 1) + 1
+                                st.session_state.chapter_versions[i] = versie
+                                autosave(st.session_state.messages, st.session_state.chapters)
+                                save_chapter_to_dropbox(st.session_state.chapters[i], i + 1, st.session_state.base_name, versie)
+                                st.rerun()
                 elif is_complete:
                     st.caption("Fragment afgerond — klaar om te schrijven.")
                     if st.button(f"✍️ Schrijf hoofdstuk {i + 1}", key=f"gen_{i}"):
                         with st.spinner(f"Hoofdstuk {i + 1} schrijven..."):
                             st.session_state.chapters[i] = generate_chapter(client, chunk, i)
+                        st.session_state.chapter_versions[i] = 1
                         autosave(st.session_state.messages, st.session_state.chapters)
-                        save_chapter_to_dropbox(st.session_state.chapters[i], i + 1, st.session_state.base_name)
+                        save_chapter_to_dropbox(st.session_state.chapters[i], i + 1, st.session_state.base_name, 1)
                         st.rerun()
                 else:
                     st.caption(f"Gesprek loopt nog — komt beschikbaar na {CHUNK_SIZE - len(chunk)} berichten.")
