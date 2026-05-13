@@ -109,6 +109,32 @@ def chunk_is_complete(chunk_index, messages):
     return chunk_index < len(chunks) - 1
 
 
+def dropbox_list_sessions(token):
+    """Haal lijst van opgeslagen sessies op uit Dropbox."""
+    try:
+        import dropbox
+        dbx = dropbox.Dropbox(token)
+        result = dbx.files_list_folder("/Autobiografie")
+        sessions = [
+            e.name for e in result.entries
+            if e.name.startswith("data_") and e.name.endswith(".json")
+        ]
+        return sorted(sessions, reverse=True)
+    except Exception:
+        return []
+
+
+def dropbox_download_session(token, filename):
+    """Download en parseer een sessie-JSON uit Dropbox."""
+    try:
+        import dropbox
+        dbx = dropbox.Dropbox(token)
+        _, response = dbx.files_download(f"/Autobiografie/{filename}")
+        return json.loads(response.content.decode("utf-8"))
+    except Exception as e:
+        return None, str(e)
+
+
 def dropbox_connect(token):
     """Verbind met Dropbox en geef accountnaam terug."""
     try:
@@ -281,6 +307,45 @@ with st.sidebar:
             else:
                 st.error(f"❌ Mislukt: {result}")
 
+        st.divider()
+        st.markdown("**📂 Sessie laden**")
+        sessions = dropbox_list_sessions(st.session_state.dropbox_token)
+        if sessions:
+            def format_session(name):
+                # data_20260513_143000.json → 13-05-2026 14:30
+                try:
+                    ts = name.replace("data_", "").replace(".json", "")
+                    dt = datetime.strptime(ts, "%Y%m%d_%H%M%S")
+                    return dt.strftime("%d-%m-%Y %H:%M")
+                except Exception:
+                    return name
+
+            selected = st.selectbox(
+                "Kies een eerdere sessie",
+                options=sessions,
+                format_func=format_session,
+                index=0,
+            )
+            if st.button("📂 Laden en verder gaan", use_container_width=True):
+                with st.spinner("Sessie laden..."):
+                    data = dropbox_download_session(st.session_state.dropbox_token, selected)
+                if data:
+                    base = selected.replace("data_", "").replace(".json", "")
+                    st.session_state.messages = data.get("messages", [])
+                    st.session_state.chapters = {
+                        int(k): v for k, v in data.get("chapters", {}).items()
+                    }
+                    st.session_state.autobiography = data.get("autobiography")
+                    st.session_state.base_name = base
+                    st.session_state.started = True
+                    st.success("✅ Sessie geladen!")
+                    st.rerun()
+                else:
+                    st.error("Kon sessie niet laden.")
+        else:
+            st.caption("Nog geen opgeslagen sessies gevonden.")
+
+        st.divider()
         if st.button("🔌 Ontkoppelen", use_container_width=True):
             st.session_state.dropbox_token = ""
             st.session_state.dropbox_confirmed = False
