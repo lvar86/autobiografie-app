@@ -109,35 +109,40 @@ def chunk_is_complete(chunk_index, messages):
     return chunk_index < len(chunks) - 1
 
 
-def dropbox_upload(token, filename, content):
-    """Upload een bestand naar Dropbox. Geeft (True, pad) of (False, fout) terug."""
+def dropbox_connect(token):
+    """Verbind met Dropbox en geef accountnaam terug."""
     try:
         import dropbox
-        from dropbox.exceptions import AuthError
+        dbx = dropbox.Dropbox(token)
+        account = dbx.users_get_current_account()
+        return True, account.name.display_name
+    except Exception as e:
+        return False, str(e)
+
+
+def dropbox_upload(token, filename, content):
+    """Upload een bestand naar Dropbox."""
+    try:
+        import dropbox
         from dropbox.files import WriteMode
         dbx = dropbox.Dropbox(token)
-        dbx.users_get_current_account()
         path = f"/Autobiografie/{filename}"
-        dbx.files_upload(
-            content.encode("utf-8"),
-            path,
-            mode=WriteMode.overwrite,
-        )
+        dbx.files_upload(content.encode("utf-8"), path, mode=WriteMode.overwrite)
         return True, path
     except Exception as e:
         return False, str(e)
 
 
 def cloud_save(filename, content):
-    """Sla op in Dropbox als token aanwezig is."""
+    """Sla op in Dropbox als token aanwezig is, toon toast-melding."""
     token = st.session_state.get("dropbox_token", "")
-    if not token:
+    if not token or not st.session_state.get("dropbox_confirmed"):
         return
     ok, result = dropbox_upload(token, filename, content)
     if ok:
-        st.session_state["dropbox_last_save"] = f"✅ Opgeslagen in Dropbox: {result}"
+        st.toast(f"☁️ Opgeslagen in Dropbox", icon="✅")
     else:
-        st.session_state["dropbox_last_save"] = f"⚠️ Dropbox fout: {result}"
+        st.toast(f"Dropbox fout: {result}", icon="⚠️")
 
 
 def autosave(messages, chapters):
@@ -236,7 +241,8 @@ defaults = {
     "started": False,
     "api_key": os.environ.get("ANTHROPIC_API_KEY", ""),
     "dropbox_token": "",
-    "dropbox_last_save": "",
+    "dropbox_confirmed": False,
+    "dropbox_account_name": "",
 }
 for key, val in defaults.items():
     if key not in st.session_state:
@@ -259,29 +265,43 @@ client = get_client()
 with st.sidebar:
     st.header("☁️ Cloud opslag")
 
-    dropbox_input = st.text_input(
-        "Dropbox toegangstoken",
-        value=st.session_state.dropbox_token,
-        type="password",
-        placeholder="sl.xxxxxxxx...",
-        help="Maak een token aan op dropbox.com/developers → App Console → Generated access token",
-    )
-    if dropbox_input != st.session_state.dropbox_token:
-        st.session_state.dropbox_token = dropbox_input
-
-    if st.session_state.dropbox_token:
-        st.caption("✅ Dropbox actief — alles wordt automatisch opgeslagen in `/Autobiografie/`")
-        if st.session_state.dropbox_last_save:
-            st.caption(st.session_state.dropbox_last_save)
+    if st.session_state.dropbox_confirmed:
+        st.success(f"✅ Verbonden als **{st.session_state.dropbox_account_name}**")
+        st.caption("Alles wordt automatisch opgeslagen in `/Autobiografie/` in jouw Dropbox.")
+        if st.button("🔌 Ontkoppelen", use_container_width=True):
+            st.session_state.dropbox_token = ""
+            st.session_state.dropbox_confirmed = False
+            st.session_state.dropbox_account_name = ""
+            st.rerun()
     else:
-        st.caption("Geen token? Volg deze stappen:")
-        st.markdown("""
+        st.caption("Verbind je Dropbox om alles automatisch op te slaan.")
+        token_input = st.text_input(
+            "Toegangstoken",
+            type="password",
+            placeholder="sl.xxxxxxxx...",
+        )
+        if st.button("Verbinden", use_container_width=True, type="primary"):
+            if token_input:
+                with st.spinner("Verbinden met Dropbox..."):
+                    ok, result = dropbox_connect(token_input)
+                if ok:
+                    st.session_state.dropbox_token = token_input
+                    st.session_state.dropbox_confirmed = True
+                    st.session_state.dropbox_account_name = result
+                    st.rerun()
+                else:
+                    st.error(f"Verbinding mislukt: {result}")
+            else:
+                st.warning("Voer eerst een token in.")
+
+        with st.expander("Hoe maak ik een token aan?"):
+            st.markdown("""
 1. Ga naar [dropbox.com/developers](https://www.dropbox.com/developers/apps)
 2. Klik **Create app**
 3. Kies **Scoped access** → **Full Dropbox**
-4. Geef de app een naam en klik **Create**
-5. Ga naar het tabblad **Settings** → scroll naar **Generated access token** → klik **Generate**
-6. Plak de token hierboven
+4. Geef een naam → **Create app**
+5. Tabblad **Settings** → scroll naar **Generated access token** → klik **Generate**
+6. Plak de token hierboven en klik Verbinden
 """)
 
     st.divider()
