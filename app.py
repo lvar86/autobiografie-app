@@ -62,6 +62,8 @@ Richtlijnen:
 - Geef het hoofdstuk een passende, poëtische titel
 - Lengte: 300–600 woorden
 
+Gebruik NOOIT gedachtestreepjes (— of –). Gebruik in plaats daarvan komma's, puntkomma's of nieuwe zinnen.
+
 Formaat — geef ALLEEN dit terug, niets anders:
 ## [Hoofdstuktitel]
 
@@ -77,6 +79,8 @@ Jouw taak:
 - Zorg voor vloeiende overgangen tussen hoofdstukken
 - Verander de inhoud van de hoofdstukken zo min mogelijk — behoud de stem
 - Schrijf in de eerste persoon
+
+Gebruik NOOIT gedachtestreepjes (— of –). Gebruik in plaats daarvan komma's, puntkomma's of nieuwe zinnen.
 
 Geef de volledige autobiografie terug, inclusief alle hoofdstukken."""
 
