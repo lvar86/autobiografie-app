@@ -223,7 +223,7 @@ def generate_chapter(client, chunk_messages, chunk_index):
 
 
 def assemble_autobiography(client, chapters):
-    all_chapters = "\n\n---\n\n".join(
+    all_chapters = "\n\n".join(
         f"Hoofdstuk {i+1}:\n{ch}" for i, ch in enumerate(chapters)
     )
     with client.messages.stream(
